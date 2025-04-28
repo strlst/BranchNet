@@ -1,0 +1,3 @@
+branch_traces_dir: /home/strlst/casys/cbp2025/traces
+experiments_dir: /home/strlst/casys/branchnet/experiments
+ml_datasets_dir: /home/strlst/casys/branchnet/datasets
