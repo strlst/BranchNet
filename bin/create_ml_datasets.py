@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 '''
 This script converts a sequential binary trace of branches produced by the 
-tracer PIN tool to a HDF5 dataset and marks the hard to predict branches in
-the trace. This format is more suitable for random accesses to arbitrary
-instances of hard-to-predict branches during training.
+tracer PIN tool to a HDF5 dataset. This format is more suitable for random
+accesses to arbitrary instances of branches during training.
 '''
 
 import bz2
@@ -16,27 +15,25 @@ import struct
 import common
 from common import PATHS, BENCHMARKS_INFO
 
-
-TARGET_BENCHMARKS = ['leela']
-HARD_BRS_FILE = 'top100'
-NUM_THREADS = 32
+NUM_THREADS = 128
 PC_BITS = 30
-
 
 def read_branch_trace(trace_path):
     struct_type = [
         ('br_pc', np.uint64),
         ('target', np.uint64),
         ('dir', np.uint8),
-        ('type', np.uint8)]
+        #('type', np.uint8),
+    ]
     record_dtype = np.dtype(struct_type, align=False)
 
-    with bz2.open(trace_path, 'rb') as f:
+    #with bz2.open(trace_path, 'rb') as f:
+        #buffer = f.read()
+    with open(trace_path, 'rb') as f:
         buffer = f.read()
     x = np.frombuffer(buffer, dtype=record_dtype)
 
     return x['br_pc'].copy(), x['dir'].copy()
-
 
 def create_new_dataset(dataset_path, pcs, directions):
     '''
@@ -71,35 +68,32 @@ def create_new_dataset(dataset_path, pcs, directions):
 
 def get_work_items():
     work_items = []    
-    for benchmark in TARGET_BENCHMARKS:
-        hard_brs = common.read_hard_brs(benchmark, HARD_BRS_FILE)
-        traces_dir = '{}/{}'.format(PATHS['branch_traces_dir'], benchmark)
-        datasets_dir = '{}/{}'.format(PATHS['ml_datasets_dir'], benchmark)
-        os.makedirs(datasets_dir, exist_ok=True)
-        for inp_info in BENCHMARKS_INFO[benchmark]['inputs']:
-            for simpoint_info in inp_info['simpoints']:
-                file_basename = '{}_{}_simpoint{}'.format(
-                    benchmark, inp_info['name'], simpoint_info['id'])
-                trace_path = '{}/{}_brtrace.bz2'.format(
-                    traces_dir, file_basename)
-                dataset_path = '{}/{}_dataset.hdf5'.format(
-                    datasets_dir, file_basename)
-                
-                if os.path.exists(dataset_path): continue
-                work_items.append((trace_path, dataset_path, hard_brs))
+    traces_dir = PATHS['branch_traces_dir']
+    datasets_dir = PATHS['ml_datasets_dir']
+    os.makedirs(datasets_dir, exist_ok=True)
+    benchmarks = os.listdir(traces_dir)
+    for benchmark in benchmarks:
+        sub = os.path.join(traces_dir, benchmark)
+        if not os.path.isdir(sub):
+            continue
+        for workload in os.listdir(sub):
+            trace_path = os.path.join(traces_dir, benchmark, workload)
+            dataset_path = os.path.join(datasets_dir, benchmark, workload)
+            # skip existing datasets
+            #if os.path.exists(dataset_path): continue
+            work_items.append((trace_path, dataset_path))
     return work_items
 
-
-def gen_dataset(trace_path, dataset_path, hard_brs):
+def gen_dataset(trace_path, dataset_path):
     print('reading file', trace_path)
     pcs, directions = read_branch_trace(trace_path)
 
-    print('Creating output file', dataset_path)
+    print('creating output file', dataset_path)
     fptr = create_new_dataset(dataset_path, pcs, directions)
 
-    for br_pc in hard_brs:
+    for br_pc in pcs:
         print('processing branch {}'.format(hex(br_pc)))
-        #find indicies of hard branches
+        # find indicies of branches
         trace_br_indices = np.argwhere(pcs == br_pc).squeeze(axis=1)
         fptr.create_dataset(
             'br_indices_{}'.format(hex(br_pc)),
@@ -114,12 +108,10 @@ def gen_dataset(trace_path, dataset_path, hard_brs):
         fptr.attrs['num_taken_{}'.format(hex(br_pc))] = num_taken
         fptr.attrs['num_not_taken_{}'.format(hex(br_pc))] = num_not_taken
 
-
 def main():
     work_items = get_work_items()
     with multiprocessing.Pool(NUM_THREADS) as pool:
         pool.starmap(gen_dataset, work_items)
-
 
 if __name__ == '__main__':
     main()

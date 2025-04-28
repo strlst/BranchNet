@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 Main file for the scripts to train and evaluate a CNN branch predictor
 """
